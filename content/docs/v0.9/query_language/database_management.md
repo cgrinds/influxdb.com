@@ -29,7 +29,7 @@ The examples in the sections below use InfluxDB's [Command Line Interface (CLI)]
 ---
 The `CREATE DATABASE` query takes the following form, where `IF NOT EXISTS` is optional:
 ```sql
-CREATE DATABASE <database_name> IF NOT EXISTS
+CREATE DATABASE <database_name> [IF NOT EXISTS]
 ```
 
 Create the database ` NOAA_water_database`:
@@ -40,11 +40,11 @@ Create the database ` NOAA_water_database`:
 
 Create the database `NOAA_water_database` only if it doesn't already exist:
 ```sh
-> CREATE DATABASE  NOAA_water_database
+> CREATE DATABASE  NOAA_water_database IF NOT EXISTS
 >
 ```
 
-InfluxDB provides no CLI response when it successfully creates a new database. In the first example, InfluxDB would return `ERR: database already exists` if the `NOAA_water_database` database already existed. In the second example, InfluxDB would not return an error if the `NOAA_water_database` database already existed.
+A successful `CREATE DATABASE` query returns an empty result. `CREATE DATABASE` returns an error if it cannot create the database for any reason. `CREATE DATABASE <database_name> IF NOT EXISTS` won't return an error if the database can't be created because the database already exists, but will return an error if it fails for other reasons. 
 
 ### Rename a database with ALTER DATABASE
 ---
@@ -61,7 +61,7 @@ CLI example:
 
 ### Delete a database with DROP DATABASE
 ---
-The `DROP DATABASE` query takes the following form:
+The `DROP DATABASE` query deletes all data, measurements, series, continuous queries, and retention policies from the specified database. The query takes the following form:
 ```sql
 DROP DATABASE <database_name> 
 ```
@@ -72,7 +72,7 @@ CLI example:
 >
 ```
 
-InfluxDB provides no CLI response when it successfully deletes a database. It returns `ERR: database not found` if the specified database does not exist.
+InfluxDB provides an empty result when it successfully deletes a database. It returns `ERR: database not found` if the specified database does not exist.
 
 ### Delete series with DROP SERIES
 ---
@@ -86,23 +86,27 @@ Delete all series from a single measurement:
 > DROP SERIES FROM h2o_feet
 ```
 
-Delete series from a measurement that have a specific tag set:
+Delete series that have a specific tag set from a single measurement:
 ```sql
 > DROP SERIES FROM h2o_feet WHERE location = 'santa_monica'
 ```
 
-Delete series across all measurements in your database that have a specific tag set:
+Delete series that have a specific tag set from all measurements in the database:
 ```sql
 > DROP SERIES WHERE location = 'santa_monica'
 ```
 
-InfluxDB provides no CLI response when it successfully deletes series.
+Note that `DROP SERIES` removes all points in the series that match the `WHERE` conditions.
+
+InfluxDB provides an empty response when it successfully deletes series.
+
+<dt> `DROP SERIES` does not support time intervals in the `WHERE` clause. See GitHub Issue [#1647](https://github.com/influxdb/influxdb/issues/1647) for more information). </dt>
 
 <dt> Currently, InfluxDB does not support regular expressions with `DROP SERIES`. See GitHub Issue [#4276](https://github.com/influxdb/influxdb/issues/4276) for more information. </dt>
 
 ### Delete measurements with DROP MEASUREMENT
 ---
-The `DROP MEASUREMENT` query deletes all data from the specified measurement and takes the following form:
+The `DROP MEASUREMENT` query deletes all data from the specified [measurement](../concepts/glossary.html#measurement) and, unlike [`DROP SERIES`](../query_language/database_management.html#delete-series-with-drop-series), it also deletes the measurement from the index. The query takes the following form:
 ```sql
 DROP MEASUREMENT <measurement_name>
 ```
@@ -112,46 +116,56 @@ Delete the measurement `h2o_feet`:
 > DROP MEASUREMENT h2o_feet
 ```
 
-InfluxDB provides no CLI response when it successfully deletes measurements.
+Note that `DROP MEASUREMENT` drops all data and series in the measurement. It does not drop the associated continuous queries.
+
+InfluxDB provides an empty response when it successfully deletes measurements.
 
 <dt> Currently, InfluxDB does not support regular expressions with `DROP MEASUREMENTS`. See GitHub Issue [#4275](https://github.com/influxdb/influxdb/issues/4275) for more information. </dt>
 
 ## Retention Policy Management
-The following sections cover how to list existing retention policies, create retention policies, change retention policies, and delete retention policies. Note that when you create a database, InfluxDB automatically creates a retention policy named `default` which has infinite retention. You may disable that auto-creation in the configuration file.
+The following sections cover how to create, list, alter, and delete retention policies. Note that when you create a database, InfluxDB automatically creates a retention policy named `default` which has infinite retention. You may disable that auto-creation in the configuration file.
 
 ### Create retention policies with CREATE RETENTION POLICY
 ---
 The `CREATE RETENTION POLICY` query takes the following form, where `DEFAULT` is optional:
 ```sql
-CREATE RETENTION POLICY <retention_policy_name> ON <database_name> DURATION <duration> REPLICATION <n> DEFAULT
+CREATE RETENTION POLICY <retention_policy_name> ON <database_name> DURATION <duration> REPLICATION <n> [DEFAULT]
 ```
 
-Create a retention policy called `one_day_only` for the database `NOAA_water_database` with a one day [duration](../concepts/glossary.html#duration) and a [replication factor](../concepts/glossary.html#replication-factor) of one:
-```sql
-> CREATE RETENTION POLICY one_day_only ON NOAA_water_database DURATION 1d REPLICATION 1
->
-```
-
-Create the same retention policy as the one in the example above, but set it as the default retention policy for the database. Does this mean all data before this dropped? Every point that you write to the database without specifying a retention policy is subject to the default retention policy.
-```sql
-> CREATE RETENTION POLICY one_day_only ON NOAA_water_database DURATION 1d REPLICATION 1 DEFAULT
->
-```
-
-InfluxDB provides no CLI response when it successfully creates a retention policy.
-
-Other options for specifying the `DURATION` of the retention policy are listed below. Note that the minimum retention period is one hour.  
+The `DURATION` clause determines how long InfluxDB keeps the data - the options for specifying the duration of the retention policy are listed below. Note that the minimum retention period is one hour.  
 `m` minutes  
 `h` hours  
 `d` days  
 `w` weeks  
 `INF` infinite
 
+<dt> Currently, the `DURATION` clause supports only single units. For example, you cannot express the duration `7230m` as `120h 30m`. See GitHub Issue [#3634](https://github.com/influxdb/influxdb/issues/3634) for more information. </dt>
+
+The `REPLICATION` clause determines how many independent copies of each point are stored in the cluster, where `n` is the number of data nodes.
+
+The `DEFAULT` option sets the new retention policy as the default retention policy for the database.
+
+Examples:
+
+Create a retention policy called `one_day_only` for the database `NOAA_water_database` with a one day duration and a replication factor of one:
+```sql
+> CREATE RETENTION POLICY one_day_only ON NOAA_water_database DURATION 1d REPLICATION 1
+>
+```
+
+Create the same retention policy as the one in the example above, but set it as the default retention policy for the database.  
+```sql
+> CREATE RETENTION POLICY one_day_only ON NOAA_water_database DURATION 1d REPLICATION 1 DEFAULT
+>
+```
+
+InfluxDB returns an empty response if the `CREATE RETENTION POLICY` query succeeds.
+
 ### Modify retention policies with ALTER RETENTION POLICY
 ---
-The `ALTER RETENTION POLICY` query takes the following form, where you must set at least one of the following flags: `DURATION`, `REPLICATION`, or `DEFAULT`:
+The `ALTER RETENTION POLICY` query takes the following form, where you must set at least one of the following: `DURATION`, `REPLICATION`, or `DEFAULT`:
 ```sql
-ALTER RETENTION POLICY <retention_policy_name> ON <database_name> DURATION <duration> REPLICATION <n> DEFAULT
+ALTER RETENTION POLICY <retention_policy_name> ON <database_name> DURATION <duration> REPLICATION <n> [DEFAULT]
 ```
 
 First, create the retention policy `what_is_time` with a `DURATION` of two days:
@@ -161,24 +175,24 @@ First, create the retention policy `what_is_time` with a `DURATION` of two days:
 
 Modify `what_is_time` to have a three week `DURATION` and make it the `DEFAULT` retention policy for `NOAA_water_database`:
 ```sql
-> ALTER RETENTION POLICY what_is_time ON NOAA_water_database DURATION 2w DEFAULT
+> ALTER RETENTION POLICY what_is_time ON NOAA_water_database DURATION 3w DEFAULT
 ```
 
-InfluxDB provides no CLI response when it successfully alters a retention policy.
+InfluxDB provides an empty response if the `ALTER RETENTION POLICY` query succeeds.
 
 ### Delete retention policies with DROP RETENTION POLICY
-Delete a retention policy with:
+Delete all measurements and data in a specific retention policy with:
 ```sql
 DROP RETENTION POLICY <retention_policy_name> ON <database_name>
 ```
 
-CLI example:
+Delete the retention policy `what_is_time` in the `NOAA_water_database` database:  
 ```sh
 > DROP RETENTION POLICY what_is_time ON NOAA_water_database
 >
 ```
 
-InfluxDB provides no CLI response when it successfully deletes a database.
+InfluxDB provides an empty response if the `DROP RETENTION POLICY` query succeeds.
 
 >**Note:** If you attempt `DROP` a retention policy that is the default retention policy for the database InfluxDB does not delete the policy and returns the error: `ERR: retention policy is default`. `CREATE` a new default policy or `ALTER` an already existing policy to be the default before deleting the retention policy.
 
